@@ -3,43 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Space Ship Game</title>
+    <title>Advanced 3D Space Game</title>
+    <link rel="manifest" href="data:application/manifest+json,{
+        &quot;name&quot;: &quot;Advanced 3D Space Game&quot;,
+        &quot;short_name&quot;: &quot;SpaceGame&quot;,
+        &quot;start_url&quot;: &quot;.&quot;,
+        &quot;display&quot;: &quot;standalone&quot;,
+        &quot;background_color&quot;: &quot;#000000&quot;,
+        &quot;theme_color&quot;: &quot;#000000&quot;,
+        &quot;icons&quot;: [{
+            &quot;src&quot;: &quot;data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA4UlEQVRYR+2X0Q6AIAhF5f9/2lpbm3sdJJAcd20h4PUcQC3Lz7b8XDTAwBkBJ/tLM5BSQvLpuoKIQAS2p4xrB6K9bZqBsNcCsNa3XRW4Fkj7lQBWuYQJAswFLACtnAswAK1fBNDcD9MnkBUC7Pe8AXABdFciB1heUBwx3tJABFyECWl/6aT4/BVQm9BJFM1yPCUNZMCrq1gNcEYqvhLJlf3mV6AW4GpIRrw/4q4NlPjgEnpNQz4/kG8sPMCouMEA3Rkwgx8C6M6AGfw44LtHoDsD6n+h1iTkAxJ1T0Qgr4+bLcAJhA9TKEIAAAAASUVORK5CYII=&quot;,
+            &quot;sizes&quot;: &quot;32x32&quot;,
+            &quot;type&quot;: &quot;image/png&quot;
+        }]
+    }">
     <style>
-        body { margin: 0; overflow: hidden; }
+        body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
         #gameCanvas { width: 100%; height: 100%; }
-        #controls {
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            right: 20px;
-            display: flex;
-            justify-content: space-between;
-        }
-        .control {
-            width: 100px;
-            height: 100px;
-            background: rgba(255,255,255,0.2);
-            border-radius: 50%;
-            touch-action: none;
-        }
-        #menuScreen {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.8);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            color: white;
-        }
-        button {
-            margin: 10px;
-            padding: 10px 20px;
-            font-size: 16px;
-        }
+        #controls, #gameInfo { position: fixed; bottom: 20px; left: 20px; right: 20px; display: flex; justify-content: space-between; }
+        #gameInfo { top: 20px; bottom: auto; color: white; }
+        .control { width: 100px; height: 100px; background: rgba(255,255,255,0.2); border-radius: 50%; touch-action: none; }
+        #menuScreen, #settingsScreen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; }
+        button { margin: 10px; padding: 10px 20px; font-size: 16px; }
+        #settingsScreen { display: none; }
+        .setting { margin: 10px 0; }
     </style>
 </head>
 <body>
@@ -48,19 +35,51 @@
         <div id="gimbal" class="control"></div>
         <div id="throttle" class="control"></div>
     </div>
+    <div id="gameInfo">
+        <div>Speed: <span id="speedDisplay">0</span></div>
+        <div>Players: <span id="playerCount">1</span></div>
+        <div>Boids: <span id="boidCount">0</span></div>
+    </div>
     <div id="menuScreen">
-        <h1>Space Explorer</h1>
-        <button onclick="startGame('solar')">Solar System</button>
-        <button onclick="startGame('binary')">Binary Star System</button>
-        <button onclick="startGame('blackhole')">Black Hole System</button>
+        <h1>Advanced Space Explorer</h1>
+        <button onclick="showSettings('solar')">Solar System</button>
+        <button onclick="showSettings('binary')">Binary Star System</button>
+        <button onclick="showSettings('blackhole')">Black Hole System</button>
+    </div>
+    <div id="settingsScreen">
+        <h2>Game Settings</h2>
+        <div class="setting">
+            <label for="survivalMode">Survival Mode:</label>
+            <input type="checkbox" id="survivalMode">
+        </div>
+        <div class="setting">
+            <label for="boidCount">Boid Count:</label>
+            <input type="number" id="boidCount" min="0" max="100" value="20">
+        </div>
+        <div class="setting">
+            <label for="playerCount">Local Players:</label>
+            <input type="number" id="playerCount" min="1" max="4" value="1">
+        </div>
+        <button onclick="startGame()">Start Game</button>
+        <button onclick="inviteLANPlayer()">Invite LAN Player</button>
+        <button onclick="joinLANGame()">Join LAN Game</button>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <script>
-        let scene, camera, renderer, world, spaceship, planets = [];
+        let scene, camera, renderer, world;
+        let players = [], planets = [], boids = [];
         let gimbalControl, throttleControl;
         const G = 6.67430e-11; // Gravitational constant
+        let selectedSystem, survivalMode;
+        let peer, connections = [];
+
+        // Camera control variables
+        let cameraOffset = new THREE.Vector3(0, 2, 5);
+        let cameraRotation = new THREE.Euler(0, 0, 0, 'YXZ');
+        let touch = { startX: 0, startY: 0, startDistance: 0 };
 
         function initGame() {
             scene = new THREE.Scene();
@@ -71,25 +90,25 @@
             world = new CANNON.World();
             world.gravity.set(0, 0, 0); // No global gravity
 
-            createSpaceship();
             createControls();
-
-            camera.position.z = 5;
+            setupCameraControls();
         }
 
-        function createSpaceship() {
+        function createSpaceship(color = 0xffff00) {
             const geometry = new THREE.ConeGeometry(0.5, 1, 32);
-            const material = new THREE.MeshBasicMaterial({color: 0xffff00});
-            spaceship = new THREE.Mesh(geometry, material);
+            const material = new THREE.MeshBasicMaterial({color: color});
+            const spaceship = new THREE.Mesh(geometry, material);
             scene.add(spaceship);
 
             const shape = new CANNON.Cylinder(0.5, 0, 1, 8);
             spaceship.body = new CANNON.Body({
                 mass: 1000,
                 shape: shape,
-                position: new CANNON.Vec3(0, 0, 0)
+                position: new CANNON.Vec3(Math.random() * 10 - 5, Math.random() * 10 - 5, Math.random() * 10 - 5)
             });
             world.addBody(spaceship.body);
+
+            return spaceship;
         }
 
         function createPlanet(radius, mass, position) {
@@ -107,6 +126,85 @@
             });
             world.addBody(planet.body);
             planets.push(planet);
+        }
+
+        function createBoid() {
+            const geometry = new THREE.ConeGeometry(0.2, 0.4, 32);
+            const material = new THREE.MeshBasicMaterial({color: 0x0000ff});
+            const boid = new THREE.Mesh(geometry, material);
+            scene.add(boid);
+
+            boid.position.set(Math.random() * 20 - 10, Math.random() * 20 - 10, Math.random() * 20 - 10);
+            boid.velocity = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
+
+            return boid;
+        }
+
+        function updateBoids() {
+            const separationDistance = 1;
+            const alignmentDistance = 2;
+            const cohesionDistance = 2;
+            const maxSpeed = 0.1;
+            const maxForce = 0.03;
+
+            boids.forEach(boid => {
+                let separation = new THREE.Vector3();
+                let alignment = new THREE.Vector3();
+                let cohesion = new THREE.Vector3();
+                let separationCount = 0;
+                let alignmentCount = 0;
+                let cohesionCount = 0;
+
+                boids.forEach(otherBoid => {
+                    if (boid !== otherBoid) {
+                        const distance = boid.position.distanceTo(otherBoid.position);
+
+                        if (distance < separationDistance) {
+                            let diff = new THREE.Vector3().subVectors(boid.position, otherBoid.position);
+                            diff.normalize().divideScalar(distance);
+                            separation.add(diff);
+                            separationCount++;
+                        }
+
+                        if (distance < alignmentDistance) {
+                            alignment.add(otherBoid.velocity);
+                            alignmentCount++;
+                        }
+
+                        if (distance < cohesionDistance) {
+                            cohesion.add(otherBoid.position);
+                            cohesionCount++;
+                        }
+                    }
+                });
+
+                if (separationCount > 0) {
+                    separation.divideScalar(separationCount);
+                    separation.normalize().multiplyScalar(maxSpeed);
+                    separation.sub(boid.velocity).clampLength(0, maxForce);
+                }
+
+                if (alignmentCount > 0) {
+                    alignment.divideScalar(alignmentCount);
+                    alignment.normalize().multiplyScalar(maxSpeed);
+                    alignment.sub(boid.velocity).clampLength(0, maxForce);
+                }
+
+                if (cohesionCount > 0) {
+                    cohesion.divideScalar(cohesionCount);
+                    cohesion.sub(boid.position);
+                    cohesion.normalize().multiplyScalar(maxSpeed);
+                    cohesion.sub(boid.velocity).clampLength(0, maxForce);
+                }
+
+                boid.velocity.add(separation);
+                boid.velocity.add(alignment);
+                boid.velocity.add(cohesion);
+                boid.velocity.clampLength(0, maxSpeed);
+
+                boid.position.add(boid.velocity);
+                boid.lookAt(boid.position.clone().add(boid.velocity));
+            });
         }
 
         function createControls() {
@@ -136,8 +234,10 @@
             if (!gimbalActive) return;
             const dx = event.clientX - gimbalCenter.x;
             const dy = event.clientY - gimbalCenter.y;
-            const force = new CANNON.Vec3(dx * 0.1, -dy * 0.1, 0);
-            spaceship.body.applyLocalForce(force, new CANNON.Vec3(0, 0, 0));
+            players.forEach(player => {
+                const force = new CANNON.Vec3(dx * 0.1, -dy * 0.1, 0);
+                player.body.applyLocalForce(force, new CANNON.Vec3(0, 0, 0));
+            });
         }
 
         function handleGimbalEnd() {
@@ -161,36 +261,81 @@
         }
 
         function applyGravity() {
-            planets.forEach(planet => {
-                const r = spaceship.body.position.distanceTo(planet.body.position);
-                const force = planet.body.mass * spaceship.body.mass * G / (r * r);
-                const direction = planet.body.position.vsub(spaceship.body.position).unit();
-                spaceship.body.applyForce(direction.scale(force), spaceship.body.position);
+            players.forEach(player => {
+                planets.forEach(planet => {
+                    const r = player.body.position.distanceTo(planet.body.position);
+                    const force = planet.body.mass * player.body.mass * G / (r * r);
+                    const direction = planet.body.position.vsub(player.body.position).unit();
+                    player.body.applyForce(direction.scale(force), player.body.position);
+                });
             });
         }
 
         function updatePhysics() {
             world.step(1/60);
-            spaceship.position.copy(spaceship.body.position);
-            spaceship.quaternion.copy(spaceship.body.quaternion);
+            players.forEach(player => {
+                player.position.copy(player.body.position);
+                player.quaternion.copy(player.body.quaternion);
 
-            const thrustForce = new CANNON.Vec3(0, 0, -throttleValue * 1000);
-            spaceship.body.applyLocalForce(thrustForce, new CANNON.Vec3(0, 0, 0));
+                const thrustForce = new CANNON.Vec3(0, 0, -throttleValue * 1000);
+                player.body.applyLocalForce(thrustForce, new CANNON.Vec3(0, 0, 0));
+
+                // Check for collision and game over in survival mode
+                if (survivalMode) {
+                    const speed = player.body.velocity.length();
+                    if (speed > 10) { // Medium speed threshold
+                        planets.forEach(planet => {
+                            if (player.position.distanceTo(planet.position) < planet.geometry.parameters.radius + 0.5) {
+                                gameOver();
+                            }
+                        });
+                    }
+                }
+            });
 
             applyGravity();
+            updateBoids();
+
+            // Update game info
+            document.getElementById('speedDisplay').textContent = players[</antArtifact>0].body.velocity.length().toFixed(2);
+            document.getElementById('playerCount').textContent = players.length;
+            document.getElementById('boidCount').textContent = boids.length;
         }
 
         function animate() {
             requestAnimationFrame(animate);
             updatePhysics();
+            updateCamera();
             renderer.render(scene, camera);
         }
 
-        function startGame(system) {
+        function showSettings(system) {
+            selectedSystem = system;
             document.getElementById('menuScreen').style.display = 'none';
+            document.getElementById('settingsScreen').style.display = 'flex';
+        }
+
+        function startGame() {
+            survivalMode = document.getElementById('survivalMode').checked;
+            const boidCount = parseInt(document.getElementById('boidCount').value);
+            const playerCount = parseInt(document.getElementById('playerCount').value);
+
+            document.getElementById('settingsScreen').style.display = 'none';
             initGame();
 
-            switch(system) {
+            // Create local players
+            for (let i = 0; i < playerCount; i++) {
+                const player = createSpaceship(0xffff00 + i * 0x002200);
+                players.push(player);
+            }
+
+            // Create boids
+            for (let i = 0; i < boidCount; i++) {
+                boids.push(createBoid());
+            }
+
+            // Create planetary system
+            switch(selectedSystem) {
                 case 'solar':
                     createPlanet(1, 1.989e30, new THREE.Vector3(0, 0, -20)); // Sun
                     createPlanet(0.5, 5.97e24, new THREE.Vector3(10, 0, -20)); // Earth
@@ -207,6 +352,127 @@
             animate();
         }
 
+        function gameOver() {
+            alert('Game Over! You crashed at high speed.');
+            location.reload(); // Restart the game
+        }
+
+        function inviteLANPlayer() {
+            if (!peer) {
+                peer = new Peer();
+                peer.on('open', (id) => {
+                    alert(`Your game ID is: ${id}\nShare this with other players to invite them.`);
+                });
+                peer.on('connection', (conn) => {
+                    connections.push(conn);
+                    conn.on('open', () => {
+                        const player = createSpaceship(0xff0000);
+                        players.push(player);
+                        conn.on('data', (data) => {
+                            if (data.type === 'update') {
+                                player.position.copy(data.position);
+                                player.quaternion.copy(data.quaternion);
+                            }
+                        });
+                    });
+                });
+            }
+        }
+
+        function joinLANGame() {
+            const gameId = prompt("Enter the game ID to join:");
+            if (gameId) {
+                peer = new Peer();
+                const conn = peer.connect(gameId);
+                conn.on('open', () => {
+                    const player = createSpaceship(0x00ff00);
+                    players.push(player);
+                    setInterval(() => {
+                        conn.send({
+                            type: 'update',
+                            position: player.position,
+                            quaternion: player.quaternion
+                        });
+                    }, 50); // Send updates 20 times per second
+                });
+            }
+        }
+
+        // Camera control functions
+        function setupCameraControls() {
+            const canvas = document.getElementById('gameCanvas');
+            canvas.addEventListener('touchstart', handleTouchStart, false);
+            canvas.addEventListener('touchmove', handleTouchMove, false);
+            canvas.addEventListener('touchend', handleTouchEnd, false);
+            canvas.addEventListener('wheel', handleMouseWheel, false);
+        }
+
+        function handleTouchStart(event) {
+            if (event.touches.length === 1) {
+                touch.startX = event.touches[0].pageX;
+                touch.startY = event.touches[0].pageY;
+            } else if (event.touches.length === 2) {
+                touch.startDistance = Math.hypot(
+                    event.touches[0].pageX - event.touches[1].pageX,
+                    event.touches[0].pageY - event.touches[1].pageY
+                );
+            }
+        }
+
+        function handleTouchMove(event) {
+            if (event.touches.length === 1) {
+                const deltaX = event.touches[0].pageX - touch.startX;
+                const deltaY = event.touches[0].pageY - touch.startY;
+                
+                cameraRotation.y -= deltaX * 0.01;
+                cameraRotation.x -= deltaY * 0.01;
+                cameraRotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraRotation.x));
+
+                touch.startX = event.touches[0].pageX;
+                touch.startY = event.touches[0].pageY;
+            } else if (event.touches.length === 2) {
+                const currentDistance = Math.hypot(
+                    event.touches[0].pageX - event.touches[1].pageX,
+                    event.touches[0].pageY - event.touches[1].pageY
+                );
+                const deltaDistance = currentDistance - touch.startDistance;
+                
+                cameraOffset.z -= deltaDistance * 0.01;
+                cameraOffset.z = Math.max(2, Math.min(20, cameraOffset.z));
+
+                touch.startDistance = currentDistance;
+            }
+        }
+
+        function handleTouchEnd(event) {
+            // Reset touch object if needed
+        }
+
+        function handleMouseWheel(event) {
+            cameraOffset.z += event.deltaY * 0.01;
+            cameraOffset.z = Math.max(2, Math.min(20, cameraOffset.z));
+        }
+
+        function updateCamera() {
+            if (players.length > 0) {
+                const player = players[0]; // Focus on the first player
+                const rotationMatrix = new THREE.Matrix4().makeRotationFromEuler(cameraRotation);
+                const cameraPosition = player.position.clone().add(cameraOffset.applyMatrix4(rotationMatrix));
+                camera.position.copy(cameraPosition);
+                camera.lookAt(player.position);
+            }
+        }
+
+        // PWA Service Worker registration
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').then(registration => {
+                console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            }, err => {
+                console.log('ServiceWorker registration failed: ', err);
+            });
+        }
+
+        // Handle window resizing
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
